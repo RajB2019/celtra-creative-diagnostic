@@ -1,3 +1,5 @@
+import { mapInsightToActions, filterActionsByPersona } from '../../engine/connectedSystems'
+
 const CONFIDENCE_ORDER = { strong: 0, moderate: 1, weak: 2, noise: 3 }
 
 function formatDelta(deltaPercent) {
@@ -19,6 +21,22 @@ function executiveLabel(text) {
     .replace(/\bCVR\b/g, 'purchase completion rate')
     .replace(/\bROAS\b/g, 'return on investment')
     .replace(/\bCPA\b/g, 'cost per acquisition')
+}
+
+function InlineActionLink({ insight, persona }) {
+  const actions = filterActionsByPersona(mapInsightToActions(insight, persona), persona)
+  const primary = actions[0]
+  if (!primary) return null
+  return (
+    <a
+      href={primary.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 ml-2"
+    >
+      {primary.product.icon} {primary.product.name}
+    </a>
+  )
 }
 
 // ─── Performance Marketer ─────────────────────────────────────────────────────
@@ -48,6 +66,7 @@ function PerformancePanel({ insights }) {
                 <span className="text-emerald-400 font-semibold">{formatDelta(i.deltaPercent)}</span>
                 {' '}
                 {i.headline.performance}
+                <InlineActionLink insight={i} persona="performance" />
               </li>
             ))}
           </ul>
@@ -130,6 +149,7 @@ function StrategistPanel({ insights }) {
                 <span className="text-emerald-400 font-semibold">{i.patternLabel}</span>
                 {' — '}
                 {strategistLabel(i.headline.strategist)}
+                <InlineActionLink insight={i} persona="strategist" />
               </li>
             ))}
           </ul>
@@ -202,6 +222,7 @@ function ExecutivePanel({ insights }) {
           {top5.map(i => (
             <li key={i.id} className="text-sm text-gray-100">
               {executiveLabel(i.headline.executive)}
+              <InlineActionLink insight={i} persona="executive" />
             </li>
           ))}
         </ul>

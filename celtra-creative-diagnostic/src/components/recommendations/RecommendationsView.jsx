@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import ActionBucket from './ActionBucket'
+import ConnectedSystemsBanner from '../shared/ConnectedSystemsBanner'
 
 export default function RecommendationsView({ insights, persona }) {
   const produceMore = useMemo(
@@ -23,6 +24,7 @@ export default function RecommendationsView({ insights, persona }) {
 
   return (
     <div className="p-6 flex flex-col gap-6">
+      <ConnectedSystemsBanner />
       <div className="grid grid-cols-3 gap-4">
         <ActionBucket bucket="more" insights={produceMore} persona={persona} />
         <ActionBucket bucket="less" insights={produceLess} persona={persona} />

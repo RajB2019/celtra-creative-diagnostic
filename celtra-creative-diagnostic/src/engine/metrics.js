@@ -6,7 +6,7 @@
  */
 export function aggregateKPIs(creatives) {
   if (!creatives || creatives.length === 0) {
-    return { totalCreatives: 0, totalImpressions: 0, avgCTR: 0, avgCVR: 0, avgCPA: 0, avgROAS: 0 };
+    return { totalCreatives: 0, totalImpressions: 0, avgCTR: 0, avgCVR: 0, avgCPA: 0, avgROAS: 0, totalSpend: 0, avgCPM: 0, avgSpend: 0 };
   }
   const n = creatives.length;
   let totalImpressions = 0;
@@ -14,6 +14,8 @@ export function aggregateKPIs(creatives) {
   let sumCVR = 0;
   let sumCPA = 0;
   let sumROAS = 0;
+  let totalSpend = 0;
+  let sumCPM = 0;
 
   for (const c of creatives) {
     totalImpressions += c.impressions || 0;
@@ -21,6 +23,8 @@ export function aggregateKPIs(creatives) {
     sumCVR += c.cvr || 0;
     sumCPA += c.cpa || 0;
     sumROAS += c.roas || 0;
+    totalSpend += c.spend || 0;
+    sumCPM += c.cpm || 0;
   }
 
   return {
@@ -30,6 +34,9 @@ export function aggregateKPIs(creatives) {
     avgCVR: sumCVR / n,
     avgCPA: sumCPA / n,
     avgROAS: sumROAS / n,
+    totalSpend: Math.round(totalSpend * 100) / 100,
+    avgCPM: Math.round((sumCPM / n) * 100) / 100,
+    avgSpend: Math.round((totalSpend / n) * 100) / 100,
   };
 }
 
@@ -160,4 +167,21 @@ export function computeVariance(values) {
   const stdDev = Math.sqrt(variance);
   const cv = mean !== 0 ? stdDev / mean : 0;
   return { mean, stdDev, cv };
+}
+
+/**
+ * assessMaturity(creative) → { maturity, gated }
+ * gated=true when maturity='early' (< 65K impressions) — score is unreliable.
+ */
+export function assessMaturity(creative) {
+  const maturity = creative.maturity || 'early';
+  return { maturity, gated: maturity === 'early' };
+}
+
+/**
+ * isScoreGated(creative) → boolean
+ * True when impressions are too low to trust the normalized score.
+ */
+export function isScoreGated(creative) {
+  return (creative.impressions || 0) < 65000;
 }

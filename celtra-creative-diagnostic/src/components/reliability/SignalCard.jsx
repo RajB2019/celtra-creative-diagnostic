@@ -1,4 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { mapInsightToActions } from '../../engine/connectedSystems'
 
 const TIER_STYLES = {
   strong: {
@@ -94,6 +95,24 @@ export default function SignalCard({ insight }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Take Action link for Strong/Moderate */}
+      {(confidence === 'strong' || confidence === 'moderate') && (() => {
+        const actions = mapInsightToActions(insight, 'performance')
+        const primary = actions.find(a => a.priority === 'primary')
+        return primary ? (
+          <a
+            href={primary.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors mt-1"
+          >
+            <span>{primary.product.icon}</span>
+            <span>Take Action in {primary.product.name}</span>
+            <span className="text-[10px] opacity-60">(placeholder)</span>
+          </a>
+        ) : null
+      })()}
     </div>
   )
 }
