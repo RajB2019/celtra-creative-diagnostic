@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ScatterChart,
   Scatter,
@@ -30,21 +31,55 @@ function formatImpressions(val) {
   return val
 }
 
+function formatSpend(val) {
+  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`
+  if (val >= 1_000) return `$${(val / 1_000).toFixed(0)}K`
+  return `$${val}`
+}
+
+const Y_AXIS_OPTIONS = [
+  { key: 'impressions', label: 'Impressions' },
+  { key: 'spend', label: 'Spend' },
+]
+
 export default function PerformanceScatter({ creatives }) {
-  const medianImpressions = median(creatives.map((c) => c.impressions))
+  const [yAxis, setYAxis] = useState('impressions')
+
+  const medianY = median(creatives.map((c) => c[yAxis] || 0))
 
   // Group by platform for separate Scatter series (to get per-dot color)
   const byPlatform = {}
   for (const c of creatives) {
     const p = c.platform
     if (!byPlatform[p]) byPlatform[p] = []
-    byPlatform[p].push({ x: c.normScore, y: c.impressions, id: c.creative_id })
+    byPlatform[p].push({ x: c.normScore, y: c[yAxis] || 0, id: c.creative_id })
   }
+
+  const yLabel = yAxis === 'spend' ? 'Spend' : 'Impressions'
+  const yFormatter = yAxis === 'spend' ? formatSpend : formatImpressions
 
   return (
     <div className="relative w-full h-full">
+      {/* Y-axis toggle */}
+      <div className="flex items-center gap-1 mb-2">
+        <span className="text-xs text-gray-500 mr-1">Y-Axis</span>
+        {Y_AXIS_OPTIONS.map((opt) => (
+          <button
+            key={opt.key}
+            onClick={() => setYAxis(opt.key)}
+            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+              yAxis === opt.key
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       {/* Quadrant labels — positioned over chart area (approx inset) */}
-      <div className="absolute inset-0 pointer-events-none" style={{ top: 10, left: 50, right: 10, bottom: 40 }}>
+      <div className="absolute pointer-events-none" style={{ top: 40, left: 50, right: 10, bottom: 40 }}>
         <span className="absolute top-1 right-2 text-xs text-gray-500">Scale</span>
         <span className="absolute top-1 left-2 text-xs text-gray-500">Budget Drain</span>
         <span className="absolute bottom-1 right-2 text-xs text-gray-500">Underfunded</span>
@@ -66,9 +101,9 @@ export default function PerformanceScatter({ creatives }) {
           <YAxis
             type="number"
             dataKey="y"
-            name="Impressions"
-            tickFormatter={formatImpressions}
-            label={{ value: 'Impressions', angle: -90, position: 'insideLeft', offset: 10, fill: '#9ca3af', fontSize: 11 }}
+            name={yLabel}
+            tickFormatter={yFormatter}
+            label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 10, fill: '#9ca3af', fontSize: 11 }}
             tick={{ fill: '#9ca3af', fontSize: 11 }}
             stroke="#4b5563"
           />
@@ -79,12 +114,16 @@ export default function PerformanceScatter({ creatives }) {
             itemStyle={{ color: '#d1d5db' }}
             formatter={(value, name) => {
               if (name === 'Score') return [value.toFixed(1), 'Score']
-              if (name === 'Impressions') return [value.toLocaleString(), 'Impressions']
+              if (name === yLabel) {
+                return yAxis === 'spend'
+                  ? [`$${value.toLocaleString()}`, 'Spend']
+                  : [value.toLocaleString(), 'Impressions']
+              }
               return [value, name]
             }}
           />
           <ReferenceLine x={50} stroke="#6b7280" strokeDasharray="4 4" />
-          <ReferenceLine y={medianImpressions} stroke="#6b7280" strokeDasharray="4 4" />
+          <ReferenceLine y={medianY} stroke="#6b7280" strokeDasharray="4 4" />
           {Object.entries(byPlatform).map(([platform, data]) => (
             <Scatter
               key={platform}

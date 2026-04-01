@@ -8,7 +8,7 @@ const STEP_NAMES = [
   'Audience Summary',
 ]
 
-export default function Sidebar({ activeStep, onStepChange, persona, onPersonaChange }) {
+export default function Sidebar({ activeStep, onStepChange }) {
   return (
     <div className="flex flex-col h-full px-4 py-6 gap-6">
       <div className="text-sm font-semibold text-indigo-400 tracking-wide">
@@ -47,7 +47,7 @@ export default function Sidebar({ activeStep, onStepChange, persona, onPersonaCh
         <div className="text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
           Persona
         </div>
-        <PersonaToggle persona={persona} onPersonaChange={onPersonaChange} />
+        <PersonaToggle />
       </div>
     </div>
   )

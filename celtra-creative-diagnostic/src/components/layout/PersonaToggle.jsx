@@ -1,24 +1,29 @@
+import { NavLink } from 'react-router-dom'
+
 const PERSONAS = [
-  { key: 'performance', label: 'Perf. Marketer' },
-  { key: 'strategist', label: 'Strategist' },
-  { key: 'executive', label: 'Executive' },
+  { path: '/', label: 'Perf. Marketer' },
+  { path: '/strategist', label: 'Strategist' },
+  { path: '/executive', label: 'Executive' },
 ]
 
-export default function PersonaToggle({ persona, onPersonaChange }) {
+export default function PersonaToggle() {
   return (
     <div className="bg-gray-800 rounded-lg p-2 flex flex-col gap-1">
-      {PERSONAS.map(({ key, label }) => (
-        <button
-          key={key}
-          onClick={() => onPersonaChange(key)}
-          className={`px-3 py-2 rounded text-sm font-medium text-left transition-colors ${
-            persona === key
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-          }`}
+      {PERSONAS.map(({ path, label }) => (
+        <NavLink
+          key={path}
+          to={path}
+          end
+          className={({ isActive }) =>
+            `px-3 py-2 rounded text-sm font-medium text-left transition-colors block ${
+              isActive
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`
+          }
         >
           {label}
-        </button>
+        </NavLink>
       ))}
     </div>
   )

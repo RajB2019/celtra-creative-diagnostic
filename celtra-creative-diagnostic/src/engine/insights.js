@@ -1,6 +1,7 @@
 // engine/insights.js — pure functions only, no React, no side effects
 
-import { groupBy, compareGroups, computeVariance } from './metrics.js';
+import { groupBy, compareGroups, computeVariance, normalizeScore } from './metrics.js';
+import { detectStaleness, classifyLifecycle, trendDirection } from './timeseries.js';
 
 /**
  * assignBucket(direction, confidence, deltaPercent) → 'more' | 'less' | 'test' | null
@@ -687,6 +688,352 @@ function ruleMotionIntensity(creatives) {
   })];
 }
 
+// ─── Rule 15: ruleSpendEfficiency ────────────────────────────────────────────
+// Top-spend-quartile vs bottom-spend-quartile, ROAS
+function ruleSpendEfficiency(creatives) {
+  const sorted = [...creatives].sort((a, b) => (a.spend || 0) - (b.spend || 0));
+  const q = Math.floor(sorted.length / 4);
+  if (q < 3) return [];
+
+  const bottomQ = sorted.slice(0, q);
+  const topQ = sorted.slice(sorted.length - q);
+
+  if (topQ.length < 3 || bottomQ.length < 3) return [];
+
+  const cmp = compareGroups(topQ, bottomQ, 'ROAS');
+  if (cmp.confidence === 'noise') return [];
+
+  const direction = cmp.delta >= 0 ? 'positive' : 'negative';
+  const bucket = assignBucket(direction, cmp.confidence, cmp.deltaPercent);
+
+  return [{
+    id: 'spend-efficiency-top-vs-bottom-roas',
+    category: 'spend',
+    patternLabel: 'Top-spend quartile vs bottom-spend quartile',
+    metric: 'ROAS',
+    labelA: 'Top spend quartile',
+    labelB: 'Bottom spend quartile',
+    avgA: cmp.avgA,
+    avgB: cmp.avgB,
+    delta: cmp.delta,
+    deltaPercent: cmp.deltaPercent,
+    nA: cmp.nA,
+    nB: cmp.nB,
+    confidence: cmp.confidence,
+    direction,
+    recommendationBucket: bucket,
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `Top-spend creatives return ${Math.abs(cmp.deltaPercent).toFixed(0)}% ${direction === 'positive' ? 'higher' : 'lower'} revenue per dollar vs bottom-spend`,
+      strategist: `Highest-investment creatives ${direction === 'positive' ? 'justify' : 'do not justify'} their spend with proportional returns`,
+      executive: `The highest-funded creatives ${direction === 'positive' ? 'deliver proportionally stronger' : 'underdeliver on'} revenue return`,
+    },
+    action: {
+      performance: `${direction === 'positive' ? 'Continue scaling top-spend creatives' : 'Audit top-spend creatives for diminishing returns'} and rebalance budget`,
+      strategist: `Review whether spend concentration aligns with creative quality and audience fit`,
+      executive: `${direction === 'positive' ? 'Sustain investment in top performers' : 'Redistribute budget from underperforming high-spend creatives to improve portfolio return'}`,
+    },
+  }];
+}
+
+// ─── Rule 16: ruleUnderfunded ────────────────────────────────────────────────
+// High-potential creatives (normalizeScore > 65) still in early maturity
+function ruleUnderfunded(creatives) {
+  // Score threshold: 50 (above peer-group median). normalizeScore returns
+  // floating-point values that can land at 49.999… due to rounding, so we
+  // round before comparing to avoid excluding creatives that are effectively
+  // at the threshold.
+  const scoreThreshold = 50;
+  const scored = creatives.map(c => ({ c, score: normalizeScore(c, creatives) }));
+  const underfunded = scored
+    .filter(({ c, score }) => Math.round(score) >= scoreThreshold && c.maturity === 'early')
+    .map(({ c }) => c);
+
+  if (underfunded.length < 2) return [];
+
+  const underfundedSet = new Set(underfunded);
+  const avgScore = underfunded.reduce((s, c) => s + normalizeScore(c, creatives), 0) / underfunded.length;
+  const avgImp = underfunded.reduce((s, c) => s + (c.impressions || 0), 0) / underfunded.length;
+  const rest = creatives.filter(c => !underfundedSet.has(c));
+  const avgRestImp = rest.length > 0 ? rest.reduce((s, c) => s + (c.impressions || 0), 0) / rest.length : 0;
+
+  return [{
+    id: 'spend-underfunded-high-potential',
+    category: 'spend',
+    patternLabel: 'High-potential creatives with low impressions',
+    metric: 'impressions',
+    labelA: 'Underfunded high-potential',
+    labelB: 'Rest of portfolio',
+    avgA: avgImp,
+    avgB: avgRestImp,
+    delta: avgImp - avgRestImp,
+    deltaPercent: avgRestImp !== 0 ? ((avgImp - avgRestImp) / avgRestImp) * 100 : 0,
+    nA: underfunded.length,
+    nB: rest.length,
+    confidence: 'moderate',
+    direction: 'positive',
+    recommendationBucket: 'more',
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${underfunded.length} high-scoring creatives are stuck in early maturity — increase delivery`,
+      strategist: `Strong creatives are being held back by low impression volume`,
+      executive: `${underfunded.length} promising creatives need more investment to reach their potential`,
+    },
+    action: {
+      performance: `Increase budget allocation for the ${underfunded.length} underfunded high-potential creatives`,
+      strategist: `Prioritize scaling these early-stage winners before testing new concepts`,
+      executive: `Fund high-potential creatives that have not yet received enough media investment`,
+    },
+  }];
+}
+
+// ─── Rule 17: ruleSpendMaturityWarning ───────────────────────────────────────
+// Early-maturity creatives that look like under-performers (score < 35) — diagnostic only
+function ruleSpendMaturityWarning(creatives) {
+  const tooEarly = creatives.filter(c =>
+    c.maturity === 'early' && normalizeScore(c, creatives) < 35
+  );
+
+  if (tooEarly.length < 2) return [];
+
+  const avgScore = tooEarly.reduce((s, c) => s + normalizeScore(c, creatives), 0) / tooEarly.length;
+  const avgImp = tooEarly.reduce((s, c) => s + (c.impressions || 0), 0) / tooEarly.length;
+
+  return [{
+    id: 'spend-maturity-warning-too-early',
+    category: 'spend',
+    patternLabel: 'Low-scoring creatives still in early maturity',
+    metric: 'impressions',
+    labelA: 'Early + low-score',
+    labelB: 'N/A (diagnostic)',
+    avgA: avgImp,
+    avgB: 0,
+    delta: 0,
+    deltaPercent: 0,
+    nA: tooEarly.length,
+    nB: 0,
+    confidence: 'weak',
+    direction: 'negative',
+    recommendationBucket: null,
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${tooEarly.length} creatives score low but have too few impressions to judge — too early to call`,
+      strategist: `Some creatives appear weak, but limited delivery makes the signal unreliable`,
+      executive: `${tooEarly.length} creatives look underperforming but haven't had enough exposure to confirm`,
+    },
+    action: {
+      performance: `Do not pause these ${tooEarly.length} creatives yet — wait for maturity before judging performance`,
+      strategist: `Flag as "pending maturity" and revisit after impressions exceed the early threshold`,
+      executive: `Hold decisions on early-stage creatives until enough data accumulates to be reliable`,
+    },
+  }];
+}
+
+// ─── Rule 18: ruleLifecycleStaleness ────────────────────────────────────────
+// Stale creatives (detectStaleness.isStale === true). Bucket: 'less'. Key automation trigger.
+function ruleLifecycleStaleness(creatives) {
+  const stale = creatives.filter(c => {
+    if (!c.daily_metrics || c.daily_metrics.length === 0) return false;
+    const staleness = detectStaleness(c.daily_metrics);
+    return staleness.isStale;
+  });
+
+  if (stale.length < 2) return [];
+
+  const avgDecay = stale.reduce((s, c) => s + detectStaleness(c.daily_metrics).decayPercent, 0) / stale.length;
+  const rest = creatives.filter(c => {
+    if (!c.daily_metrics || c.daily_metrics.length === 0) return true;
+    return !detectStaleness(c.daily_metrics).isStale;
+  });
+  const avgStaleImp = stale.reduce((s, c) => s + (c.impressions || 0), 0) / stale.length;
+  const avgRestImp = rest.length > 0 ? rest.reduce((s, c) => s + (c.impressions || 0), 0) / rest.length : 0;
+
+  return [{
+    id: 'lifecycle-staleness-detected',
+    category: 'lifecycle',
+    patternLabel: 'Stale creatives with significant audience decay',
+    metric: 'impressions',
+    labelA: 'Stale creatives',
+    labelB: 'Active creatives',
+    avgA: avgStaleImp,
+    avgB: avgRestImp,
+    delta: avgStaleImp - avgRestImp,
+    deltaPercent: avgRestImp !== 0 ? ((avgStaleImp - avgRestImp) / avgRestImp) * 100 : 0,
+    nA: stale.length,
+    nB: rest.length,
+    confidence: 'strong',
+    direction: 'negative',
+    recommendationBucket: 'less',
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${stale.length} creatives are stale — avg ${avgDecay.toFixed(0)}% decay from peak impressions`,
+      strategist: `${stale.length} creatives have exhausted their audience — diminishing returns on continued delivery`,
+      executive: `${stale.length} ads have gone stale and are no longer reaching new audiences effectively`,
+    },
+    action: {
+      performance: `Pause or rotate the ${stale.length} stale creatives and replace with fresh variants`,
+      strategist: `Schedule creative refresh for stale assets — audience fatigue is reducing delivery efficiency`,
+      executive: `Replace aging ads that have stopped performing to maintain portfolio freshness`,
+    },
+  }];
+}
+
+// ─── Rule 19: ruleEvergreenPerformers ───────────────────────────────────────
+// Evergreen lifecycle + high normalized score. Bucket: 'more'.
+function ruleEvergreenPerformers(creatives) {
+  const scored = creatives.map(c => ({ c, score: normalizeScore(c, creatives) }));
+  const evergreens = scored
+    .filter(({ c, score }) => c.lifecycle === 'evergreen' && score >= 60)
+    .map(({ c }) => c);
+
+  if (evergreens.length < 2) return [];
+
+  const evergreenSet = new Set(evergreens);
+  const avgScore = evergreens.reduce((s, c) => s + normalizeScore(c, creatives), 0) / evergreens.length;
+  const avgImp = evergreens.reduce((s, c) => s + (c.impressions || 0), 0) / evergreens.length;
+  const rest = creatives.filter(c => !evergreenSet.has(c));
+  const avgRestImp = rest.length > 0 ? rest.reduce((s, c) => s + (c.impressions || 0), 0) / rest.length : 0;
+
+  return [{
+    id: 'lifecycle-evergreen-high-performers',
+    category: 'lifecycle',
+    patternLabel: 'Evergreen creatives with strong performance scores',
+    metric: 'impressions',
+    labelA: 'Evergreen high-performers',
+    labelB: 'Rest of portfolio',
+    avgA: avgImp,
+    avgB: avgRestImp,
+    delta: avgImp - avgRestImp,
+    deltaPercent: avgRestImp !== 0 ? ((avgImp - avgRestImp) / avgRestImp) * 100 : 0,
+    nA: evergreens.length,
+    nB: rest.length,
+    confidence: 'strong',
+    direction: 'positive',
+    recommendationBucket: 'more',
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${evergreens.length} evergreen creatives maintain strong scores (avg ${avgScore.toFixed(0)}) — scale them`,
+      strategist: `${evergreens.length} creatives show sustained performance without audience fatigue`,
+      executive: `${evergreens.length} ads continue to deliver strong results over time — proven winners`,
+    },
+    action: {
+      performance: `Increase budget allocation for the ${evergreens.length} evergreen high-performers`,
+      strategist: `Use evergreen creatives as always-on anchors and study what makes them durable`,
+      executive: `Invest more in proven long-lasting ads to maximize sustained portfolio performance`,
+    },
+  }];
+}
+
+// ─── Rule 20: ruleDecayByPlatform ───────────────────────────────────────────
+// Compare average decay rates across platforms
+function ruleDecayByPlatform(creatives) {
+  const insights = [];
+  const byPlatform = groupBy(creatives, 'platform');
+
+  // Compute average decay percent per platform
+  const platformDecay = [];
+  for (const [platform, platformCreatives] of byPlatform) {
+    const withMetrics = platformCreatives.filter(c => c.daily_metrics && c.daily_metrics.length >= 14);
+    if (withMetrics.length < 3) continue;
+    const decays = withMetrics.map(c => detectStaleness(c.daily_metrics).decayPercent);
+    const avgDecay = decays.reduce((s, d) => s + d, 0) / decays.length;
+    platformDecay.push({ platform, avgDecay, n: withMetrics.length, creatives: withMetrics });
+  }
+
+  if (platformDecay.length < 2) return insights;
+
+  // Sort by decay: highest decay first
+  platformDecay.sort((a, b) => b.avgDecay - a.avgDecay);
+
+  const worst = platformDecay[0];
+  const best = platformDecay[platformDecay.length - 1];
+
+  if (worst.avgDecay - best.avgDecay < 10) return insights; // not meaningful
+
+  const delta = worst.avgDecay - best.avgDecay;
+  const deltaPercent = best.avgDecay !== 0 ? (delta / best.avgDecay) * 100 : 0;
+  const confidence = (worst.n >= 10 && best.n >= 10) ? 'strong' : (worst.n >= 5 && best.n >= 5) ? 'moderate' : 'weak';
+
+  insights.push({
+    id: `lifecycle-decay-${worst.platform.toLowerCase()}-vs-${best.platform.toLowerCase()}`,
+    category: 'lifecycle',
+    patternLabel: `Creative decay: ${worst.platform} vs ${best.platform}`,
+    metric: 'decay_percent',
+    labelA: worst.platform,
+    labelB: best.platform,
+    avgA: worst.avgDecay,
+    avgB: best.avgDecay,
+    delta,
+    deltaPercent,
+    nA: worst.n,
+    nB: best.n,
+    confidence,
+    direction: 'negative',
+    recommendationBucket: assignBucket('negative', confidence, deltaPercent),
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${worst.platform} creatives decay ${delta.toFixed(0)}pp faster than ${best.platform} — refresh more often`,
+      strategist: `Creative fatigue sets in faster on ${worst.platform} — shorter shelf life requires more frequent rotation`,
+      executive: `Ads on ${worst.platform} lose effectiveness faster than on ${best.platform} — rotation cadence needs adjustment`,
+    },
+    action: {
+      performance: `Shorten creative rotation intervals on ${worst.platform} and monitor decay rates weekly`,
+      strategist: `Plan a faster creative refresh cadence for ${worst.platform} campaigns`,
+      executive: `Increase creative production pipeline for ${worst.platform} to counter faster audience fatigue`,
+    },
+  });
+
+  return insights;
+}
+
+// ─── Rule 21: ruleRampingPotential ──────────────────────────────────────────
+// Ramping lifecycle + above-median metrics. Bucket: 'test'.
+function ruleRampingPotential(creatives) {
+  const ramping = creatives.filter(c => c.lifecycle === 'ramping');
+  if (ramping.length < 2) return [];
+
+  const ctrMed = median(creatives.map(c => c.ctr));
+  const cvrMed = median(creatives.map(c => c.cvr));
+
+  const promising = ramping.filter(c => c.ctr > ctrMed || c.cvr > cvrMed);
+  if (promising.length < 2) return [];
+
+  const promisingSet = new Set(promising);
+  const avgCTR = promising.reduce((s, c) => s + (c.ctr || 0), 0) / promising.length;
+  const avgImp = promising.reduce((s, c) => s + (c.impressions || 0), 0) / promising.length;
+  const rest = creatives.filter(c => !promisingSet.has(c));
+  const avgRestImp = rest.length > 0 ? rest.reduce((s, c) => s + (c.impressions || 0), 0) / rest.length : 0;
+
+  return [{
+    id: 'lifecycle-ramping-potential',
+    category: 'lifecycle',
+    patternLabel: 'Ramping creatives with above-median engagement',
+    metric: 'impressions',
+    labelA: 'Promising ramping creatives',
+    labelB: 'Rest of portfolio',
+    avgA: avgImp,
+    avgB: avgRestImp,
+    delta: avgImp - avgRestImp,
+    deltaPercent: avgRestImp !== 0 ? ((avgImp - avgRestImp) / avgRestImp) * 100 : 0,
+    nA: promising.length,
+    nB: rest.length,
+    confidence: 'moderate',
+    direction: 'positive',
+    recommendationBucket: 'test',
+    personas: ['performance', 'strategist', 'executive'],
+    headline: {
+      performance: `${promising.length} ramping creatives show above-median engagement — candidates for scale testing`,
+      strategist: `${promising.length} early-stage creatives are outperforming peers — worth accelerating`,
+      executive: `${promising.length} newer ads show early promise and deserve more investment to validate`,
+    },
+    action: {
+      performance: `Increase delivery on the ${promising.length} promising ramping creatives to accelerate learning`,
+      strategist: `Prioritize these ramping creatives for A/B test slots in the next campaign cycle`,
+      executive: `Fund early winners to determine which new ads can scale into top performers`,
+    },
+  }];
+}
+
 /**
  * generateInsights(creatives) → InsightObject[]
  */
@@ -706,5 +1053,12 @@ export function generateInsights(creatives) {
     ...ruleConversionLeakage(creatives),
     ...ruleFunnelROASReliability(creatives),
     ...ruleMotionIntensity(creatives),
+    ...ruleSpendEfficiency(creatives),
+    ...ruleUnderfunded(creatives),
+    ...ruleSpendMaturityWarning(creatives),
+    ...ruleLifecycleStaleness(creatives),
+    ...ruleEvergreenPerformers(creatives),
+    ...ruleDecayByPlatform(creatives),
+    ...ruleRampingPotential(creatives),
   ];
 }

@@ -1,3 +1,6 @@
+import ConnectedActionGroup from '../shared/ConnectedActionGroup'
+import { mapInsightToActions, filterActionsByPersona } from '../../engine/connectedSystems'
+
 const BUCKET_STYLES = {
   more: {
     header: 'text-emerald-400 border-emerald-700',
@@ -58,6 +61,9 @@ export default function ActionBucket({ bucket, insights, persona }) {
               {insight.action?.[persona] && (
                 <p className="text-sm text-gray-300 mt-1">{insight.action[persona]}</p>
               )}
+              <ConnectedActionGroup
+                actions={filterActionsByPersona(mapInsightToActions(insight, persona), persona)}
+              />
             </div>
           ))
         )}

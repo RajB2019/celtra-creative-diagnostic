@@ -2,3 +2,14 @@ node_modules/
 dist/
 celtra-creative-diagnostic/node_modules/
 celtra-creative-diagnostic/dist/
+.DS_Store
+.claude/
+Celtra.code-workspace
+raj.md
+scopeGoal.md
+session-log.md
+TODO.md
+task-sequence.md
+AGENTS.MD
+CLAUDE.md
+Creative Performance Sample Data - sample_data_creative_performance_vibecoding.csv

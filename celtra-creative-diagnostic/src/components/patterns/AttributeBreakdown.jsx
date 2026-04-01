@@ -54,12 +54,14 @@ function formatMetricValue(v, metric) {
   if (metric === 'ctr' || metric === 'cvr') return (v * 100).toFixed(1) + '%'
   if (metric === 'roas') return v.toFixed(2)
   if (metric === 'cpa') return '$' + v.toFixed(1)
+  if (metric === 'cpm') return '$' + v.toFixed(2)
   return v.toFixed(2)
 }
 
 function ArrowBadge({ groupAvg, overallAvg, metric }) {
-  const isBetter = metric === 'cpa'
-    ? groupAvg < overallAvg   // lower CPA is better
+  const lowerIsBetter = metric === 'cpa' || metric === 'cpm'
+  const isBetter = lowerIsBetter
+    ? groupAvg < overallAvg   // lower CPA/CPM is better
     : groupAvg > overallAvg
 
   if (Math.abs(groupAvg - overallAvg) < 1e-9) return null
